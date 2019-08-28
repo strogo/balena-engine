@@ -31,6 +31,7 @@ export VALIDATE_ORIGIN_BRANCH
 # make DOCKER_LDFLAGS="-X github.com/docker/docker/daemon/graphdriver.priority=overlay2,devicemapper" dynbinary
 #
 DOCKER_ENVS := \
+	-e GO111MODULE \
 	-e DOCKER_CROSSPLATFORMS \
 	-e BUILD_APT_MIRROR \
 	-e BUILDFLAGS \

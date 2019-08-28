@@ -80,12 +80,6 @@ if [ "$AUTO_GOPATH" ]; then
 	export GOPATH="${PWD}/.gopath"
 fi
 
-if [ ! "$GOPATH" ]; then
-	echo >&2 'error: missing GOPATH; please see https://golang.org/doc/code.html#GOPATH'
-	echo >&2 '  alternatively, set AUTO_GOPATH=1'
-	exit 1
-fi
-
 # Adds $1_$2 to DOCKER_BUILDTAGS unless it already
 # contains a word starting from $1_
 add_buildtag() {
