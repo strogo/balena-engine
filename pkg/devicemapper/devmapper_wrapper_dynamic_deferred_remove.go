@@ -1,5 +1,6 @@
 // +build linux,cgo,!static_build
 // +build !libdm_dlsym_deferred_remove,!libdm_no_deferred_remove
+// +build !no_devicemapper
 
 package devicemapper // import "github.com/docker/docker/pkg/devicemapper"
 

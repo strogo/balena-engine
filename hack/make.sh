@@ -106,17 +106,6 @@ if \
 	DOCKER_BUILDTAGS+=' btrfs_noversion'
 fi
 
-# test whether "libdevmapper.h" is new enough to support deferred remove
-# functionality. We favour libdm_dlsym_deferred_remove over
-# libdm_no_deferred_remove in dynamic cases because the binary could be shipped
-# with a newer libdevmapper than the one it was built with.
-if \
-	command -v gcc &> /dev/null \
-	&& ! ( echo -e  '#include <libdevmapper.h>\nint main() { dm_task_deferred_remove(NULL); }'| gcc -xc - -o /dev/null $(pkg-config --libs devmapper) &> /dev/null ) \
-; then
-	add_buildtag libdm dlsym_deferred_remove
-fi
-
 # Use these flags when compiling the tests and final binary
 
 IAMSTATIC='true'
