@@ -27,8 +27,32 @@
 ARG CROSS="false"
 ARG GO_VERSION=1.12.12
 ARG DEBIAN_FRONTEND=noninteractive
+ARG BUILD_ARCH="amd64"
 
-FROM golang:${GO_VERSION}-stretch AS base
+# multi-arch base-images {{{
+# makes sure we also set up qemu-based emulation
+FROM balenalib/amd64-golang:$GO_VERSION-stretch-build AS amd64-base
+FROM balenalib/i386-golang:$GO_VERSION-stretch-build AS i386-base
+
+FROM balenalib/aarch64-golang:$GO_VERSION-stretch-build AS aarch64-base
+ENTRYPOINT [ "qemu-aarch64-static", "-execve" ]
+SHELL      [ "qemu-aarch64-static", "-execve", "/bin/sh", "-c" ]
+
+FROM balenalib/armv7hf-golang:$GO_VERSION-stretch-build AS armv7hf-base
+ENTRYPOINT [ "qemu-arm-static", "-execve" ]
+SHELL      [ "qemu-arm-static", "-execve", "/bin/sh", "-c" ]
+
+# we need to use the raspberry pi base image to get armv6
+FROM balenalib/raspberry-pi-golang:$GO_VERSION-stretch-build AS armv6l-base
+ENTRYPOINT [ "qemu-arm-static", "-execve" ]
+SHELL      [ "qemu-arm-static", "-execve", "/bin/sh", "-c" ]
+
+FROM balenalib/armv5e-golang:$GO_VERSION-stretch-build AS armv5e-base
+ENTRYPOINT [ "qemu-arm-static", "-execve" ]
+SHELL      [ "qemu-arm-static", "-execve", "/bin/sh", "-c" ]
+# }}}
+
+FROM ${BUILD_ARCH}-base AS base
 ARG APT_MIRROR
 RUN sed -ri "s/(httpredir|deb).debian.org/${APT_MIRROR:-deb.debian.org}/g" /etc/apt/sources.list \
  && sed -ri "s/(security).debian.org/${APT_MIRROR:-security.debian.org}/g" /etc/apt/sources.list
@@ -207,23 +231,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	apparmor \
 	aufs-tools \
 	bash-completion \
-	btrfs-tools \
+	# btrfs-tools \
 	iptables \
 	jq \
 	libcap2-bin \
-	libdevmapper-dev \
+	# libdevmapper-dev \
 	libudev-dev \
 	libsystemd-dev \
-	binutils-mingw-w64 \
-	g++-mingw-w64-x86-64 \
+	# binutils-mingw-w64 \
+	# g++-mingw-w64-x86-64 \
 	net-tools \
 	pigz \
 	python3-pip \
 	python3-setuptools \
 	python3-wheel \
 	thin-provisioning-tools \
-	vim \
-	vim-common \
+	# vim \
+	# vim-common \
 	xfsprogs \
 	zip \
 	bzip2 \
@@ -242,7 +266,7 @@ COPY --from=gotestsum /build/ /usr/local/bin/
 COPY --from=tomlv /build/ /usr/local/bin/
 COPY --from=vndr /build/ /usr/local/bin/
 COPY --from=tini /build/ /usr/local/bin/
-COPY --from=proxy /build/ /usr/local/bin/
+#COPY --from=proxy /build/ /usr/local/bin/
 COPY --from=registry /build/registry* /usr/local/bin/
 COPY --from=criu /build/ /usr/local/
 COPY --from=rootlesskit /build/ /usr/local/bin/

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e -o pipefail
+
+. hack/make/.balena-env
+
+TESTFLAGS+=" -test.timeout=${TIMEOUT:-5m}"
+TESTDIRS="${TESTDIRS:-./...}"
+exclude_paths='/vendor/|/integration'
+# exclude btrfs and devicemapper dependend tests
+exclude_paths="${exclude_paths}|/daemon/graphdriver/btrfs|/daemon/graphdriver/devmapper|/contrib/docker-device-tool"
+pkg_list=$(go list $TESTDIRS | grep -vE "($exclude_paths)")
+
+dest="${TEST_DEST:-$DEST}"
+mkdir -p "$dest"
+
+gotestsum --format=standard-quiet --jsonfile="$dest/go-test-report.json" --junitfile="$dest/junit-report.xml" -- \
+	"${BUILDFLAGS[@]}" \
+	-cover \
+	-coverprofile="$dest/profile.out" \
+	-covermode=atomic \
+	${TESTFLAGS} \
+	${pkg_list}
