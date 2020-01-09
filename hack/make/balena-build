@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -e -o pipefail
+
+[ -z "$KEEPDEST" ] && rm -rf "$DEST"
+
+. hack/make/.balena-env
+
+# run the build
+(
+    set -x
+    rm -rf "$DEST/balena-engine" || true
+    mkdir -p "$DEST/balena-engine"
+
+    export GOMAXPROCS=1
+    # export CGO_ENABLED
+
+    go build \
+	-o "$DEST/balena-engine/balena-engine" \
+	"${BUILDFLAGS[@]}" \
+	-ldflags "
+		$LDFLAGS
+        -X github.com/docker/docker/dockerversion.ProductName=balenaEngine
+        -X github.com/docker/docker/dockerversion.PlatformName=${arch}
+        -X github.com/docker/docker/dockerversion.Version=${VERSION_ENGINE}
+        -X github.com/docker/docker/dockerversion.GitCommit=${COMMIT_ENGINE}
+        -X github.com/docker/docker/dockerversion.BuildTime=${ts_now}
+        -X github.com/docker/docker/dockerversion.IAmStatic=${IAMSTATIC}
+        -X github.com/docker/docker/vendor/github.com/docker/cli/cli.PlatformName=${arch}
+        -X github.com/docker/docker/vendor/github.com/docker/cli/cli.Version=${VERSION_CLI}
+        -X github.com/docker/docker/vendor/github.com/docker/cli/cli.GitCommit=${COMMIT_CLI}
+        -X github.com/docker/docker/vendor/github.com/docker/cli/cli.BuildTime=${ts_now}
+        -X github.com/docker/docker/vendor/github.com/containerd/containerd/version.Version=${VERSION_CONTAINERD}
+        -X github.com/docker/docker/vendor/github.com/containerd/containerd/version.Revision=${COMMIT_CONTAINERD}
+        -X github.com/docker/docker/vendor/github.com/opencontainers/runc.version=${VERSION_RUNC}
+        -X github.com/docker/docker/vendor/github.com/opencontainers/runc.gitCommit=${COMMIT_RUNC}
+	" \
+        ./cmd/balena-engine
+)
+
+# hash the binary
+(
+    set -x
+    cd "$DEST/balena-engine" || exit 1
+    sha256sum balena-engine > balena-engine.sha256
+)
+
+# symlink component binaries
+(
+    set -x
+    cd "$DEST/balena-engine" || exit 1
+    for file in \
+        balena-engine-daemon \
+        balena-engine-containerd \
+        balena-engine-containerd-shim \
+        balena-engine-containerd-ctr \
+        balena-engine-runc \
+        balena-engine-proxy; do
+            ln -sf balena-engine "$file"
+    done
+)
+
+# pack the release artifacts
+(
+    set -x
+    archive="balena-engine-$version-$arch.tar.gz"
+    tar -czvf "/tmp/$archive" -C "$DEST" ./balena-engine
+    mv "/tmp/$archive" "$DEST/$archive"
+)

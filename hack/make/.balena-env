@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+arch=${BUILD_ARCH:-$(uname -m)}
+debug="${BUILD_DEBUG:-}"
+static="${BUILD_STATIC:-}"
+version=${VERSION:-$(git describe --tags --always)}
+ts_now=$(date -u -d "@${SOURCE_DATE_EPOCH:-$(date +%s)}" --rfc-3339 ns 2> /dev/null | sed -e 's/ /T/')
+
+DEST="${BUILD_DEST:-$DEST}" # to allow overwriting output location
+
+BUILDTAGS="journald exclude_disk_quota" # engine features
+BUILDTAGS="$BUILDTAGS exclude_graphdriver_btrfs exclude_graphdriver_zfs exclude_graphdriver_devicemapper" # engine graphdrivers
+BUILDTAGS="$BUILDTAGS no_btrfs no_cri no_devicemapper" # containerd
+BUILDTAGS="$BUILDTAGS seccomp apparmor" # runc
+
+# allow setting additional go build tags
+extra_buildtags="${BUILD_EXTRA_BUILDTAGS:-}"
+BUILDTAGS="$BUILDTAGS $extra_buildtags"
+
+LDFLAGS=""
+if [ -z "$debug" ]; then
+    LDFLAGS="$LDFLAGS -w" # strip DWARF debug data
+fi
+if [ -n "$static" ]; then
+    LDFLAGS="$LDFLAGS -extldflags \"-fno-PIC -static\""
+    BUILDTAGS="$BUILDTAGS static_build"
+    IAMSTATIC="true"
+else
+    IAMSTATIC="false"
+fi
+
+BUILDFLAGS=(
+    -tags "netgo $BUILDTAGS"
+    -installsuffix netgo
+    -buildmode pie
+)
+
+COMMIT_ENGINE=${COMMIT_ENGINE:-$DOCKER_GITCOMMIT}
+VERSION_ENGINE=${VERSION_ENGINE:-$version}
+COMMIT_CLI=${COMMIT_CLI:-$COMMIT_ENGINE}
+VERSION_CLI=${VERSION_CLI:-$VERSION_ENGINE}
+COMMIT_CONTAINERD=${COMMIT_CONTAINERD:-$COMMIT_ENGINE}
+VERSION_CONTAINERD=${VERSION_CONTAINERD:-$VERSION_ENGINE}
+COMMIT_RUNC=${COMMIT_RUNC:-$COMMIT_ENGINE}
+VERSION_RUNC=${VERSION_RUNC:-$VERSION_ENGINE}
