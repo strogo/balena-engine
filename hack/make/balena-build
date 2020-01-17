@@ -12,8 +12,9 @@ set -e -o pipefail
     mkdir -p "$DEST/balena-engine"
 
     export GOMAXPROCS=1
-    # export CGO_ENABLED
+    export CGO_ENABLED=1
 
+    go env
     go build \
 	-o "$DEST/balena-engine/balena-engine" \
 	"${BUILDFLAGS[@]}" \
