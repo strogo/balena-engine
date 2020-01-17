@@ -23,17 +23,21 @@ if [ -z "$debug" ]; then
 fi
 if [ -n "$static" ]; then
     LDFLAGS="$LDFLAGS -extldflags \"-fno-PIC -static\""
-    BUILDTAGS="$BUILDTAGS static_build"
+    BUILDTAGS="$BUILDTAGS netgo osusergo static_build"
     IAMSTATIC="true"
 else
     IAMSTATIC="false"
 fi
 
 BUILDFLAGS=(
-    -tags "netgo $BUILDTAGS"
-    -installsuffix netgo
-    -buildmode pie
+    -tags "$BUILDTAGS"
+    -installsuffix=netgo
 )
+if [[ ${BUILD_ARCH} = $(go env GOHOSTARCH) ]]; then
+    BUILDFLAGS+=(-buildmode=pie)
+else
+    BUILDFLAGS+=(-buildmode=exe)
+fi
 
 COMMIT_ENGINE=${COMMIT_ENGINE:-$DOCKER_GITCOMMIT}
 VERSION_ENGINE=${VERSION_ENGINE:-$version}
@@ -43,3 +47,47 @@ COMMIT_CONTAINERD=${COMMIT_CONTAINERD:-$COMMIT_ENGINE}
 VERSION_CONTAINERD=${VERSION_CONTAINERD:-$VERSION_ENGINE}
 COMMIT_RUNC=${COMMIT_RUNC:-$COMMIT_ENGINE}
 VERSION_RUNC=${VERSION_RUNC:-$VERSION_ENGINE}
+
+buildarch="$(go env GOHOSTARCH)"
+export GOOS=linux
+case "${arch}" in
+    amd64|x86_64)
+	[ "${buildarch}" == "amd64" ] && return
+	export GOARCH=amd64
+	export CC=x86_64-linux-gnu-gcc
+	export CGO_ENABLED=1
+	;;
+    i386|x86)
+	[ "${buildarch}" == "386" ] && return
+	export GOARCH=i386
+	export CC=x86-linux-gnu-gcc
+	export CGO_ENABLED=1
+	;;
+    aarch64|arm64)
+	[ "${buildarch}" == "arm64" ] && return
+	export GOARCH=arm64
+	export CC=aarch64-linux-gnu-gcc
+	export CGO_ENABLED=1
+	;;
+    armv*)
+	[ "${buildarch}" == "arm" ] && return
+	export GOARCH=arm
+	case "${arch}" in
+	    armv7hf)
+		export GOARM=7
+		export CC=arm-linux-gnueabihf-gcc
+		export CGO_ENABLED=1
+		;;
+	    armv6l)
+		export GOARM=6
+		export CC=arm-linux-gnueabi-gcc
+		export CGO_ENABLED=1
+		;;
+	    armv5e)
+		export GOARM=5
+		export CC=arm-linux-gnueabi-gcc
+		export CGO_ENABLED=1
+		;;
+	esac
+	;;
+esac
