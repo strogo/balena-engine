@@ -1,4 +1,4 @@
-module github.com/docker/docker/v17
+module github.com/docker/docker
 
 go 1.12
 
@@ -82,10 +82,47 @@ replace (
 	// This is a bit jank, but we don't want to import a different version of
 	// ourself because we're not using a /v17 suffix.
 	github.com/docker/docker => ./
-
-	github.com/docker/libnetwork => github.com/docker/libnetwork v0.0.0-20190826164827-92d1fbe1eb08
 	// github.com/docker/libnetwork => github.com/docker/libnetwork v0.0.0-20190726130434-09cdcc8c0eab
 	github.com/hashicorp/go-immutable-radix => github.com/tonistiigi/go-immutable-radix v0.0.0-20170803115627-826af9ccf0fe
 	github.com/ishidawataru/sctp => github.com/ishidawataru/sctp v0.0.0-20180918013207-6e2cb1366111
 	github.com/moby/buildkit => github.com/moby/buildkit v0.0.0-20190819135608-588c73e1e4f0
+)
+
+// DO NOT EDIT BELOW THIS LINE -------- reserved for downstream projects --------
+
+// additional dependencies as a result of our single-binary approach
+require (
+	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
+	github.com/checkpoint-restore/go-criu v0.0.0-20181120144056-17b0214f6c48 // v3.11
+	github.com/containerd/aufs v0.0.0-20190114185352-f894a800659b
+	github.com/cyphar/filepath-securejoin v0.2.2 // v0.2.2
+	github.com/docker/docker-credential-helpers v0.6.3 // v0.6.3
+	github.com/docker/go v1.5.1-1.0.20160303222718-d30aec9fd63c // Contains a customized version of canonical/json and is used by Notary. The package is periodically rebased on current Go versions.
+	github.com/hashicorp/go-version v0.0.0-20180322230233-23480c066577
+	github.com/jaguilar/vt100 v0.0.0-20150826170717-2703a27b14ea
+	github.com/mitchellh/mapstructure v0.0.0-20180715050151-f15292f7a699
+	github.com/mrunalp/fileutils v0.0.0-20171103030105-7d4729fb3618
+	github.com/theupdateframework/notary v0.6.1 // v0.6.1
+	github.com/tonistiigi/units v0.0.0-20180711220420-6950e57a87ea
+	github.com/urfave/cli v1.22.1 // v1.20.0
+	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f
+	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415
+	github.com/xeipuuv/gojsonschema v0.0.0-20160323030313-93e72a773fad
+	gopkg.in/yaml.v2 v2.2.3 // v2.2.3
+	vbom.ml/util v0.0.0-20170409195630-256737ac55c4
+)
+
+replace github.com/jaguilar/vt100 => github.com/tonistiigi/vt100 v0.0.0-20190402012908-ad4c4a574305
+
+// balena-engine dependencies
+require (
+	github.com/balena-os/circbuf v0.0.0-20171122095043-56e73111d0b2
+	github.com/balena-os/librsync-go v0.0.0-20190124092159-7457649327d3
+)
+
+replace (
+	github.com/containerd/containerd => github.com/balena-os/balena-containerd v1.2.1-0.20191219120618-41397e3f34ba
+	github.com/docker/cli => github.com/balena-os/balena-engine-cli v0.0.0-20200106174412-81f0b4cfcc32
+	github.com/docker/libnetwork => github.com/balena-os/balena-libnetwork v0.8.0-dev.2.0.20191211143252-21ccc1c70642
+	github.com/opencontainers/runc => github.com/balena-os/balena-runc v1.0.0-rc2.0.20191129132948-a1c6a79d4105
 )
