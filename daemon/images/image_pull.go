@@ -73,7 +73,7 @@ func (i *ImageService) pullImageWithReference(ctx context.Context, ref reference
 			RegistryService:  i.registryService,
 			ImageEventLogger: i.LogImageEvent,
 			MetadataStore:    i.distributionMetadataStore,
-			ImageStore:       distribution.NewImageConfigStoreFromStore(i.imageStore, i.deltaStore),
+			ImageStore:       distribution.NewImageConfigStoreFromStore(i.imageStore),
 			ReferenceStore:   i.referenceStore,
 		},
 		DownloadManager: i.downloadManager,

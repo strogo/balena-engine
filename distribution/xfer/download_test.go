@@ -15,15 +15,11 @@ import (
 	"github.com/docker/distribution"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/layer"
-	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/progress"
 	"github.com/opencontainers/go-digest"
 )
 
-const (
-	maxDownloadConcurrency = 3
-	maxDownloadAttempts    = 5
-)
+const maxDownloadConcurrency = 3
 
 type mockLayer struct {
 	layerData bytes.Buffer
@@ -35,10 +31,6 @@ type mockLayer struct {
 
 func (ml *mockLayer) TarStream() (io.ReadCloser, error) {
 	return ioutil.NopCloser(bytes.NewBuffer(ml.layerData.Bytes())), nil
-}
-
-func (ml *mockLayer) TarSeekStream() (ioutils.ReadSeekCloser, error) {
-	return nil, fmt.Errorf("not implemented")
 }
 
 func (ml *mockLayer) TarStreamFrom(layer.ChainID) (io.ReadCloser, error) {
@@ -169,16 +161,6 @@ type mockDownloadDescriptor struct {
 	registeredDiffID layer.DiffID
 	expectedDiffID   layer.DiffID
 	simulateRetries  int
-	size             int64
-}
-
-func (d *mockDownloadDescriptor) DeltaBase() io.ReadSeeker {
-	// TODO implement a test for DeltaBase
-	return nil
-}
-
-func (d *mockDownloadDescriptor) Size() int64 {
-	return d.size
 }
 
 // Key returns the key used to deduplicate downloads.
@@ -288,7 +270,7 @@ func TestSuccessfulDownload(t *testing.T) {
 	layerStore := &mockLayerStore{make(map[layer.ChainID]*mockLayer)}
 	lsMap := make(map[string]layer.Store)
 	lsMap[runtime.GOOS] = layerStore
-	ldm := NewLayerDownloadManager(lsMap, maxDownloadConcurrency, maxDownloadAttempts, func(m *LayerDownloadManager) { m.waitDuration = time.Millisecond })
+	ldm := NewLayerDownloadManager(lsMap, maxDownloadConcurrency, func(m *LayerDownloadManager) { m.waitDuration = time.Millisecond })
 
 	progressChan := make(chan progress.Progress)
 	progressDone := make(chan struct{})
@@ -352,7 +334,7 @@ func TestCancelledDownload(t *testing.T) {
 	layerStore := &mockLayerStore{make(map[layer.ChainID]*mockLayer)}
 	lsMap := make(map[string]layer.Store)
 	lsMap[runtime.GOOS] = layerStore
-	ldm := NewLayerDownloadManager(lsMap, maxDownloadConcurrency, maxDownloadAttempts, func(m *LayerDownloadManager) { m.waitDuration = time.Millisecond })
+	ldm := NewLayerDownloadManager(lsMap, maxDownloadConcurrency, func(m *LayerDownloadManager) { m.waitDuration = time.Millisecond })
 	progressChan := make(chan progress.Progress)
 	progressDone := make(chan struct{})
 

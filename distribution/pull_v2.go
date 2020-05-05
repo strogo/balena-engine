@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"runtime"
@@ -19,6 +20,7 @@ import (
 	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/docker/distribution/registry/client/auth"
+	"github.com/docker/distribution/registry/client/transport"
 	"github.com/docker/docker/distribution/metadata"
 	"github.com/docker/docker/distribution/xfer"
 	"github.com/docker/docker/image"
@@ -40,8 +42,6 @@ var (
 	errRootFSMismatch = errors.New("layers from manifest don't match image configuration")
 	errRootFSInvalid  = errors.New("invalid rootfs in image configuration")
 )
-
-const maxDownloadAttempts = 5
 
 // ImageConfigPullError is an error pulling the image config blob
 // (only applies to schema2).
@@ -143,11 +143,6 @@ type v2LayerDescriptor struct {
 	tmpFile           *os.File
 	verifier          digest.Verifier
 	src               distribution.Descriptor
-	ctx               context.Context
-	layerDownload     io.ReadCloser
-	downloadAttempts  uint8
-	downloadOffset    int64
-	deltaBase         io.ReadSeeker
 }
 
 func (ld *v2LayerDescriptor) Key() string {
@@ -165,84 +160,173 @@ func (ld *v2LayerDescriptor) DiffID() (layer.DiffID, error) {
 	return ld.V2MetadataService.GetDiffID(ld.digest)
 }
 
-func (ld *v2LayerDescriptor) reset() error {
-	if ld.layerDownload != nil {
-		ld.layerDownload.Close()
-		ld.layerDownload = nil
-	}
-
-	layer, err := ld.open(ld.ctx)
-	if err != nil {
-		return err
-	}
-
-	if _, err := layer.Seek(ld.downloadOffset, os.SEEK_SET); err != nil {
-		return err
-	}
-
-	ld.layerDownload = ioutils.TeeReadCloser(ioutils.NewCancelReadCloser(ld.ctx, layer), ld.verifier)
-
-	return nil
-}
-
-func (ld *v2LayerDescriptor) Read(p []byte) (int, error) {
-	if ld.downloadAttempts <= 0 {
-		return 0, fmt.Errorf("no request retries left")
-	}
-
-	if ld.layerDownload == nil {
-		if err := ld.reset(); err != nil {
-			ld.downloadAttempts -= 1
-			return 0, err
-		}
-	}
-
-	n, err := ld.layerDownload.Read(p)
-	ld.downloadOffset += int64(n)
-	if err == io.EOF {
-		if !ld.verifier.Verified() {
-			return n, fmt.Errorf("filesystem layer verification failed for digest %s", ld.digest)
-		}
-	} else if err != nil {
-		logrus.Warnf("failed to download layer: \"%v\", retrying to read again", err)
-		ld.downloadAttempts -= 1
-		ld.layerDownload = nil
-		err = nil
-	}
-
-	return n, err
-}
-
-func (ld *v2LayerDescriptor) DeltaBase() io.ReadSeeker {
-	return ld.deltaBase
-}
-
-func (ld *v2LayerDescriptor) Close() {
-	if ld.layerDownload != nil {
-		ld.layerDownload.Close()
-	}
-}
-
 func (ld *v2LayerDescriptor) Download(ctx context.Context, progressOutput progress.Output) (io.ReadCloser, int64, error) {
 	logrus.Debugf("pulling blob %q", ld.digest)
 
-	ld.ctx = ctx
-	ld.layerDownload = nil
-	ld.downloadAttempts = maxDownloadAttempts
-	ld.verifier = ld.digest.Verifier()
+	var (
+		err    error
+		offset int64
+	)
 
-	progress.Update(progressOutput, ld.ID(), "Ready to download")
+	if ld.tmpFile == nil {
+		ld.tmpFile, err = createDownloadFile()
+		if err != nil {
+			return nil, 0, xfer.DoNotRetry{Err: err}
+		}
+	} else {
+		offset, err = ld.tmpFile.Seek(0, os.SEEK_END)
+		if err != nil {
+			logrus.Debugf("error seeking to end of download file: %v", err)
+			offset = 0
 
-	return ioutils.NewReadCloserWrapper(ld, func() error { return nil }), ld.src.Size, nil
+			ld.tmpFile.Close()
+			if err := os.Remove(ld.tmpFile.Name()); err != nil {
+				logrus.Errorf("Failed to remove temp file: %s", ld.tmpFile.Name())
+			}
+			ld.tmpFile, err = createDownloadFile()
+			if err != nil {
+				return nil, 0, xfer.DoNotRetry{Err: err}
+			}
+		} else if offset != 0 {
+			logrus.Debugf("attempting to resume download of %q from %d bytes", ld.digest, offset)
+		}
+	}
+
+	tmpFile := ld.tmpFile
+
+	layerDownload, err := ld.open(ctx)
+	if err != nil {
+		logrus.Errorf("Error initiating layer download: %v", err)
+		return nil, 0, retryOnError(err)
+	}
+
+	if offset != 0 {
+		_, err := layerDownload.Seek(offset, os.SEEK_SET)
+		if err != nil {
+			if err := ld.truncateDownloadFile(); err != nil {
+				return nil, 0, xfer.DoNotRetry{Err: err}
+			}
+			return nil, 0, err
+		}
+	}
+	size, err := layerDownload.Seek(0, os.SEEK_END)
+	if err != nil {
+		// Seek failed, perhaps because there was no Content-Length
+		// header. This shouldn't fail the download, because we can
+		// still continue without a progress bar.
+		size = 0
+	} else {
+		if size != 0 && offset > size {
+			logrus.Debug("Partial download is larger than full blob. Starting over")
+			offset = 0
+			if err := ld.truncateDownloadFile(); err != nil {
+				return nil, 0, xfer.DoNotRetry{Err: err}
+			}
+		}
+
+		// Restore the seek offset either at the beginning of the
+		// stream, or just after the last byte we have from previous
+		// attempts.
+		_, err = layerDownload.Seek(offset, os.SEEK_SET)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	reader := progress.NewProgressReader(ioutils.NewCancelReadCloser(ctx, layerDownload), progressOutput, size-offset, ld.ID(), "Downloading")
+	defer reader.Close()
+
+	if ld.verifier == nil {
+		ld.verifier = ld.digest.Verifier()
+	}
+
+	_, err = io.Copy(tmpFile, io.TeeReader(reader, ld.verifier))
+	if err != nil {
+		if err == transport.ErrWrongCodeForByteRange {
+			if err := ld.truncateDownloadFile(); err != nil {
+				return nil, 0, xfer.DoNotRetry{Err: err}
+			}
+			return nil, 0, err
+		}
+		return nil, 0, retryOnError(err)
+	}
+
+	progress.Update(progressOutput, ld.ID(), "Verifying Checksum")
+
+	if !ld.verifier.Verified() {
+		err = fmt.Errorf("filesystem layer verification failed for digest %s", ld.digest)
+		logrus.Error(err)
+
+		// Allow a retry if this digest verification error happened
+		// after a resumed download.
+		if offset != 0 {
+			if err := ld.truncateDownloadFile(); err != nil {
+				return nil, 0, xfer.DoNotRetry{Err: err}
+			}
+
+			return nil, 0, err
+		}
+		return nil, 0, xfer.DoNotRetry{Err: err}
+	}
+
+	progress.Update(progressOutput, ld.ID(), "Download complete")
+
+	logrus.Debugf("Downloaded %s to tempfile %s", ld.ID(), tmpFile.Name())
+
+	_, err = tmpFile.Seek(0, os.SEEK_SET)
+	if err != nil {
+		tmpFile.Close()
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			logrus.Errorf("Failed to remove temp file: %s", tmpFile.Name())
+		}
+		ld.tmpFile = nil
+		ld.verifier = nil
+		return nil, 0, xfer.DoNotRetry{Err: err}
+	}
+
+	// hand off the temporary file to the download manager, so it will only
+	// be closed once
+	ld.tmpFile = nil
+
+	return ioutils.NewReadCloserWrapper(tmpFile, func() error {
+		tmpFile.Close()
+		err := os.RemoveAll(tmpFile.Name())
+		if err != nil {
+			logrus.Errorf("Failed to remove temp file: %s", tmpFile.Name())
+		}
+		return err
+	}), size, nil
+}
+
+func (ld *v2LayerDescriptor) Close() {
+	if ld.tmpFile != nil {
+		ld.tmpFile.Close()
+		if err := os.RemoveAll(ld.tmpFile.Name()); err != nil {
+			logrus.Errorf("Failed to remove temp file: %s", ld.tmpFile.Name())
+		}
+	}
+}
+
+func (ld *v2LayerDescriptor) truncateDownloadFile() error {
+	// Need a new hash context since we will be redoing the download
+	ld.verifier = nil
+
+	if _, err := ld.tmpFile.Seek(0, os.SEEK_SET); err != nil {
+		logrus.Errorf("error seeking to beginning of download file: %v", err)
+		return err
+	}
+
+	if err := ld.tmpFile.Truncate(0); err != nil {
+		logrus.Errorf("error truncating download file: %v", err)
+		return err
+	}
+
+	return nil
 }
 
 func (ld *v2LayerDescriptor) Registered(diffID layer.DiffID) {
 	// Cache mapping from this layer's DiffID to the blobsum
 	ld.V2MetadataService.Add(diffID, metadata.V2Metadata{Digest: ld.digest, SourceRepository: ld.repoInfo.Name.Name()})
-}
-
-func (ld *v2LayerDescriptor) Size() int64 {
-	return ld.src.Size
 }
 
 func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, platform *specs.Platform) (tagUpdated bool, err error) {
@@ -486,57 +570,6 @@ func (p *v2Puller) pullSchema2Layers(ctx context.Context, target distribution.De
 		return target.Digest, nil
 	}
 
-	// Pull the image config
-	configJSON, err := p.pullSchema2Config(ctx, target.Digest)
-	if err != nil {
-		return "", ImageConfigPullError{Err: err}
-	}
-
-	var deltaBase io.ReadSeeker
-
-	// check for delta config
-	img, err := image.NewFromJSON(configJSON)
-	if err != nil {
-		return "", err
-	}
-
-	if img.Config != nil {
-		if base, ok := img.Config.Labels["io.resin.delta.base"]; ok {
-			digest, err := digest.Parse(base)
-			if err != nil {
-				return "", err
-			}
-
-			stream, err := p.config.ImageStore.GetTarSeekStream(digest)
-			if err != nil {
-				return "", err
-			}
-			defer stream.Close()
-
-			deltaBase = stream
-		}
-
-		if config, ok := img.Config.Labels["io.resin.delta.config"]; ok {
-			digest := digest.FromString(config)
-
-			if _, err := p.config.ImageStore.Get(digest); err == nil {
-				// If the image already exists locally, no need to pull
-				// anything.
-				return digest, nil
-			}
-
-			configJSON = []byte(config)
-		}
-	}
-
-	configRootFS, err := p.config.ImageStore.RootFSFromConfig(configJSON)
-	if err == nil && configRootFS == nil {
-		return "", errRootFSInvalid
-	}
-	if err != nil {
-		return "", err
-	}
-
 	var descriptors []xfer.DownloadDescriptor
 
 	// Note that the order of this loop is in the direction of bottom-most
@@ -548,21 +581,36 @@ func (p *v2Puller) pullSchema2Layers(ctx context.Context, target distribution.De
 			repoInfo:          p.repoInfo,
 			V2MetadataService: p.V2MetadataService,
 			src:               d,
-			deltaBase:         deltaBase,
 		}
 
 		descriptors = append(descriptors, layerDescriptor)
 	}
 
+	configChan := make(chan []byte, 1)
+	configErrChan := make(chan error, 1)
 	layerErrChan := make(chan error, 1)
 	downloadsDone := make(chan struct{})
 	var cancel func()
 	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 
+	// Pull the image config
+	go func() {
+		configJSON, err := p.pullSchema2Config(ctx, target.Digest)
+		if err != nil {
+			configErrChan <- ImageConfigPullError{Err: err}
+			cancel()
+			return
+		}
+		configChan <- configJSON
+	}()
+
 	var (
-		downloadedRootFS *image.RootFS  // rootFS from registered layers
-		release          func()         // release resources from rootFS download
+		configJSON       []byte          // raw serialized image config
+		downloadedRootFS *image.RootFS   // rootFS from registered layers
+		configRootFS     *image.RootFS   // rootFS from configuration
+		release          func()          // release resources from rootFS download
+		configPlatform   *specs.Platform // for LCOW when registering downloaded layers
 	)
 
 	layerStoreOS := runtime.GOOS
@@ -570,15 +618,43 @@ func (p *v2Puller) pullSchema2Layers(ctx context.Context, target distribution.De
 		layerStoreOS = platform.OS
 	}
 
+	// https://github.com/docker/docker/issues/24766 - Err on the side of caution,
+	// explicitly blocking images intended for linux from the Windows daemon. On
+	// Windows, we do this before the attempt to download, effectively serialising
+	// the download slightly slowing it down. We have to do it this way, as
+	// chances are the download of layers itself would fail due to file names
+	// which aren't suitable for NTFS. At some point in the future, if a similar
+	// check to block Windows images being pulled on Linux is implemented, it
+	// may be necessary to perform the same type of serialisation.
+	if runtime.GOOS == "windows" {
+		configJSON, configRootFS, configPlatform, err = receiveConfig(p.config.ImageStore, configChan, configErrChan)
+		if err != nil {
+			return "", err
+		}
+		if configRootFS == nil {
+			return "", errRootFSInvalid
+		}
+		if err := checkImageCompatibility(configPlatform.OS, configPlatform.OSVersion); err != nil {
+			return "", err
+		}
 
-	if len(descriptors) != len(configRootFS.DiffIDs) {
-		return "", errRootFSMismatch
-	}
+		if len(descriptors) != len(configRootFS.DiffIDs) {
+			return "", errRootFSMismatch
+		}
+		if platform == nil {
+			// Early bath if the requested OS doesn't match that of the configuration.
+			// This avoids doing the download, only to potentially fail later.
+			if !system.IsOSSupported(configPlatform.OS) {
+				return "", fmt.Errorf("cannot download image with operating system %q when requesting %q", configPlatform.OS, layerStoreOS)
+			}
+			layerStoreOS = configPlatform.OS
+		}
 
-	// Populate diff ids in descriptors to avoid downloading foreign layers
-	// which have been side loaded
-	for i := range descriptors {
-		descriptors[i].(*v2LayerDescriptor).diffID = configRootFS.DiffIDs[i]
+		// Populate diff ids in descriptors to avoid downloading foreign layers
+		// which have been side loaded
+		for i := range descriptors {
+			descriptors[i].(*v2LayerDescriptor).diffID = configRootFS.DiffIDs[i]
+		}
 	}
 
 	if p.config.DownloadManager != nil {
@@ -603,6 +679,21 @@ func (p *v2Puller) pullSchema2Layers(ctx context.Context, target distribution.De
 	} else {
 		// We have nothing to download
 		close(downloadsDone)
+	}
+
+	if configJSON == nil {
+		configJSON, configRootFS, _, err = receiveConfig(p.config.ImageStore, configChan, configErrChan)
+		if err == nil && configRootFS == nil {
+			err = errRootFSInvalid
+		}
+		if err != nil {
+			cancel()
+			select {
+			case <-downloadsDone:
+			case <-layerErrChan:
+			}
+			return "", err
+		}
 	}
 
 	select {
@@ -654,6 +745,25 @@ func (p *v2Puller) pullOCI(ctx context.Context, ref reference.Named, mfst *ocisc
 	}
 	id, err = p.pullSchema2Layers(ctx, mfst.Target(), mfst.Layers, platform)
 	return id, manifestDigest, err
+}
+
+func receiveConfig(s ImageConfigStore, configChan <-chan []byte, errChan <-chan error) ([]byte, *image.RootFS, *specs.Platform, error) {
+	select {
+	case configJSON := <-configChan:
+		rootfs, err := s.RootFSFromConfig(configJSON)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		platform, err := s.PlatformFromConfig(configJSON)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return configJSON, rootfs, platform, nil
+	case err := <-errChan:
+		return nil, nil, nil, err
+		// Don't need a case for ctx.Done in the select because cancellation
+		// will trigger an error in p.pullSchema2ImageConfig.
+	}
 }
 
 // pullManifestList handles "manifest lists" which point to various
@@ -886,6 +996,10 @@ func fixManifestLayers(m *schema1.Manifest) error {
 	}
 
 	return nil
+}
+
+func createDownloadFile() (*os.File, error) {
+	return ioutil.TempFile("", "GetImageBlob")
 }
 
 func toOCIPlatform(p manifestlist.PlatformSpec) specs.Platform {

@@ -50,20 +50,17 @@ type ImageServiceConfig struct {
 func NewImageService(config ImageServiceConfig) *ImageService {
 	logrus.Debugf("Max Concurrent Downloads: %d", config.MaxConcurrentDownloads)
 	logrus.Debugf("Max Concurrent Uploads: %d", config.MaxConcurrentUploads)
-	logrus.Debugf("Max Download Attempts: %d", config.MaxDownloadAttempts)
-	logrus.Debugf("Max Uploads Attempts: %d", config.MaxUploadAttempts)
 	return &ImageService{
 		containers:                config.ContainerStore,
 		distributionMetadataStore: config.DistributionMetadataStore,
-		downloadManager:           xfer.NewLayerDownloadManager(config.LayerStores, config.MaxConcurrentDownloads, config.MaxDownloadAttempts),
+		downloadManager:           xfer.NewLayerDownloadManager(config.LayerStores, config.MaxConcurrentDownloads),
 		eventsService:             config.EventsService,
 		imageStore:                config.ImageStore,
 		layerStores:               config.LayerStores,
-		deltaStore:                config.DeltaStore,
 		referenceStore:            config.ReferenceStore,
 		registryService:           config.RegistryService,
 		trustKey:                  config.TrustKey,
-		uploadManager:             xfer.NewLayerUploadManager(config.MaxConcurrentUploads, config.MaxUploadAttempts),
+		uploadManager:             xfer.NewLayerUploadManager(config.MaxConcurrentUploads),
 	}
 }
 
@@ -75,7 +72,6 @@ type ImageService struct {
 	eventsService             *daemonevents.Events
 	imageStore                image.Store
 	layerStores               map[string]layer.Store // By operating system
-	deltaStore                image.Store
 	pruneRunning              int32
 	referenceStore            dockerreference.Store
 	registryService           registry.Service
@@ -138,14 +134,6 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 	// Indexing by OS is safe here as validation of OS has already been performed in create() (the only
 	// caller), and guaranteed non-nil
 	return i.layerStores[container.OS].CreateRWLayer(container.ID, layerID, rwLayerOpts)
-}
-
-func (i *ImageService) ImageStore() image.Store {
-	return i.imageStore
-}
-
-func (i *ImageService) LayerStore(os string) layer.Store {
-	return i.layerStores[os]
 }
 
 // GetLayerByID returns a layer by ID and operating system
