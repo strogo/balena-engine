@@ -266,18 +266,20 @@ type imglock struct {
 }
 
 func newImageLock(ls layer.Store, img *image.Image) (*imglock, error) {
-	var leases []layer.Layer
+	var lock imglock
 	for i := range img.RootFS.DiffIDs {
 		rootFS := *img.RootFS
 		rootFS.DiffIDs = rootFS.DiffIDs[:i+1]
 
 		l, err := ls.Get(rootFS.ChainID())
 		if err != nil {
+			// free previously leases layers
+			lock.unlock(ls)
 			return nil, errors.Wrapf(err, "failed to aquire lease on %v", l.DiffID())
 		}
-		leases = append(leases, l)
+		lock.layers = append(lock.layers, l)
 	}
-	return &imglock{leases}, nil
+	return &lock, nil
 }
 
 func (lock *imglock) unlock(ls layer.Store) {
