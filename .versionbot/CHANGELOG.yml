@@ -1,4 +1,23 @@
 - commits:
+    - subject: Lock destination layers while delta is being processed
+      hash: 975fa869974318a31b9c2ca70c2750e3a2e981c3
+      body: |
+        During fingerpinting of the source image the destination layers are not
+        exepmt from being released (e.g. when `balena image rm <iid>`) is run
+        simultaneously.
+        Similarly when processing the destination layers to generate deltas we
+        only hold one reference at a time, leaving the subsequent layers
+        vulnerable to the same issues.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Robert Günzler <robertg@balena.io>
+        signed-off-by: Robert Günzler <robertg@balena.io>
+      author: Robert Günzler
+      nested: []
+  version: 19.03.16
+  date: 2021-01-19T13:16:21.563Z
+- commits:
     - subject: 'top_unix.go: allow busybox ps with no args'
       hash: 6617c4d76d275e05d6055d91aabbd7df25332342
       body: |
