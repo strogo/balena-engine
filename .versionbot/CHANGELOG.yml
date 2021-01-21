@@ -1,4 +1,53 @@
 - commits:
+    - subject: Add build script using buildx
+      hash: 5a2dee4be3b33ca7cebd5e94ba0a90b471e5c6d0
+      body: |
+        Repo type remains unchanged even though CI will trigger the
+        build-in-container task for the engine now.
+        We need the balena-engine type here to ensure versioning works with the
+        engine specific quirks.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Robert Günzler <robertg@balena.io>
+        signed-off-by: Robert Günzler <robertg@balena.io>
+      author: Robert Günzler
+      nested: []
+    - subject: Enable buildkit syntax for the dockerfile
+      hash: 605d73b46eeee6aa3f5367ec2328944473f9cb6c
+      body: |
+        This allows building a binary like:
+        DOCKER_BUILDKIT=1 docker build --target=binary -o ./bundles/ .
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Robert Günzler <robertg@balena.io>
+        signed-off-by: Robert Günzler <robertg@balena.io>
+      author: Robert Günzler
+      nested: []
+    - subject: Fix the proxy installer to use balena-libnetwork
+      hash: 8aad2565c2302062c9d40c850aa77c15c4d9f6e0
+      body: ''
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Robert Günzler <robertg@balena.io>
+        signed-off-by: Robert Günzler <robertg@balena.io>
+      author: Robert Günzler
+      nested: []
+    - subject: Add a SECURITY.md
+      hash: 477d70db260a8dda71e2dba12ccd9f169fe9b480
+      body: ''
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Robert Günzler <robertg@balena.io>
+        signed-off-by: Robert Günzler <robertg@balena.io>
+      author: Robert Günzler
+      nested: []
+  version: 19.03.16
+  date: 2021-01-21T18:16:59.166Z
+- commits:
     - subject: 'top_unix.go: allow busybox ps with no args'
       hash: 6617c4d76d275e05d6055d91aabbd7df25332342
       body: |
