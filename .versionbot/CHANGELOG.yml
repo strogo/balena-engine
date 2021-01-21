@@ -1,4 +1,36 @@
 - commits:
+    - subject: >-
+        Remove overlay2 layer files that are not in use on engine start [Kyle
+        Harding]
+      hash: 857521b7801b4a6abf02f8da4673e868cfbe702a
+      body: |
+        There is a problem pattern in support where layers are not being
+        cleaned up properly and are eating up a device's storage.
+        This problem has been with us for a while and we thought it was
+        addressed in #203 but recent data points to this not being the case.
+
+        It was decided that in the short term we should look at integrating
+        the logic of this cleanup script into the engine startup.
+
+        https://github.com/roman-mazur/engine-check
+
+        https://jel.ly.fish/b41ce978-088e-420a-9176-8387c9108328
+      footer:
+        Change-type: patch
+        change-type: patch
+        Changelog-entry: >-
+          Remove overlay2 layer files that are not in use on engine start [Kyle
+          Harding]
+        changelog-entry: >-
+          Remove overlay2 layer files that are not in use on engine start [Kyle
+          Harding]
+        Signed-off-by: Kyle Harding <kyle@balena.io>
+        signed-off-by: Kyle Harding <kyle@balena.io>
+      author: Kyle Harding
+      nested: []
+  version: 19.03.17
+  date: 2021-01-21T21:21:28.232Z
+- commits:
     - subject: Add a SECURITY.md
       hash: 477d70db260a8dda71e2dba12ccd9f169fe9b480
       body: ''
